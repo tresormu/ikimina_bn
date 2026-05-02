@@ -1,0 +1,418 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MEMBER
+  TREASURER
+  ADMIN
+  LENDER
+}
+
+enum GroupFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum ContributionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  MISSED
+}
+
+enum LoanStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  REPAID
+}
+
+enum UssdSessionState {
+  OPEN
+  CONTINUE
+  CLOSED
+}
+
+enum NotificationType {
+  CONTRIBUTION_CONFIRMED
+  CONTRIBUTION_FAILED
+  MISSED_PAYMENT
+  YOUR_TURN
+  LOAN_APPROVED
+  LOAN_DECLINED
+  WEEKLY_REMINDER
+  SUBSCRIPTION_TRIAL_ENDING
+  SUBSCRIPTION_PAYMENT_DUE
+  SUBSCRIPTION_PAYMENT_SUCCESS
+  SUBSCRIPTION_PAYMENT_FAILED
+  SUBSCRIPTION_GRACE_PERIOD_WARNING
+  GROUP_SUSPENDED
+  GROUP_REACTIVATED
+  SUBSCRIPTION_TIER_UPGRADED
+  SUBSCRIPTION_TIER_DOWNGRADED
+}
+
+enum NotificationChannel {
+  SMS
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  PERMANENTLY_FAILED
+}
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED
+  ESCALATED
+  CLOSED
+}
+
+enum SubscriptionTier {
+  STARTER
+  GROWTH
+  COMMUNITY
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  OVERDUE
+  SUSPENDED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+model User {
+  id              String    @id @default(uuid())
+  phoneNumber     String    @unique
+  fullName        String?
+  nationalId      String?   @unique
+  profilePhotoUrl String?
+  roles           Role[]    @default([MEMBER])
+  isActive        Boolean   @default(true)
+  deletedAt       DateTime?
+
+  refreshTokens        RefreshToken[]
+  groupMembers         GroupMember[]
+  contributions        Contribution[]
+  loansRequested       Loan[]
+  loanVotes            LoanVote[]
+  notifications        Notification[]
+  notificationSettings NotificationSetting[]
+  sharedCreditReports  SharedCreditReport[]
+  disputesRaised       Dispute[]
+  ussdSessions         UssdSession[]
+  auditLogs            AuditLog[]
+  subscriptionPayments SubscriptionPayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OtpRecord {
+  id          String   @id @default(uuid())
+  phoneNumber String
+  hashedOtp   String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Group {
+  id                 String             @id @default(uuid())
+  name               String
+  contributionAmount Float
+  frequency          GroupFrequency
+  inviteCode         String             @unique
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  isSuspended        Boolean            @default(false)
+  suspendedAt        DateTime?
+  suspensionReason   String?
+  deletedAt          DateTime?
+
+  members              GroupMember[]
+  inviteCodes          GroupInviteCode[]
+  rotationLogs         RotationLog[]
+  contributions        Contribution[]
+  loans                Loan[]
+  subscriptions        GroupSubscription[]
+  subscriptionPayments SubscriptionPayment[]
+  disputes             Dispute[]
+  feedEvents           ActivityFeedEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GroupMember {
+  id       String   @id @default(uuid())
+  groupId  String
+  userId   String
+  role     Role     @default(MEMBER)
+  isActive Boolean  @default(true)
+  joinedAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+}
+
+model GroupInviteCode {
+  id        String   @id @default(uuid())
+  groupId   String
+  code      String   @unique
+  expiresAt DateTime
+  group     Group    @relation(fields: [groupId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model RotationLog {
+  id            String   @id @default(uuid())
+  groupId       String
+  actorId       String
+  previousOrder Json
+  newOrder      Json
+  group         Group    @relation(fields: [groupId], references: [id])
+  createdAt     DateTime @default(now())
+}
+
+model Contribution {
+  id                String             @id @default(uuid())
+  groupId           String
+  userId            String
+  amount            Float
+  weekNumber        Int
+  status            ContributionStatus @default(PENDING)
+  momoTransactionId String?
+  failureReason     String?
+
+  group Group @relation(fields: [groupId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CreditScore {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  score       Int
+  label       String
+  breakdown   Json
+  lastUpdated DateTime @default(now())
+}
+
+model CreditScoreHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  score     Int
+  label     String
+  breakdown Json
+  timestamp DateTime @default(now())
+}
+
+model SharedCreditReport {
+  id         String                  @id @default(uuid())
+  userId     String
+  linkId     String                  @unique
+  expiresAt  DateTime
+  revoked    Boolean                 @default(false)
+  user       User                    @relation(fields: [userId], references: [id])
+  accessLogs SharedReportAccessLog[]
+  createdAt  DateTime                @default(now())
+}
+
+model SharedReportAccessLog {
+  id             String             @id @default(uuid())
+  sharedReportId String
+  ipAddress      String
+  accessedAt     DateTime           @default(now())
+  sharedReport   SharedCreditReport @relation(fields: [sharedReportId], references: [id])
+}
+
+model Loan {
+  id          String     @id @default(uuid())
+  groupId     String
+  requesterId String
+  amount      Float
+  reason      String
+  status      LoanStatus @default(PENDING)
+  disbursedAt DateTime?
+
+  group      Group           @relation(fields: [groupId], references: [id])
+  requester  User            @relation(fields: [requesterId], references: [id])
+  votes      LoanVote[]
+  repayments LoanRepayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LoanVote {
+  id        String   @id @default(uuid())
+  loanId    String
+  voterId   String
+  vote      String // APPROVE or DECLINE
+  loan      Loan     @relation(fields: [loanId], references: [id])
+  voter     User     @relation(fields: [voterId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([loanId, voterId])
+}
+
+model LoanRepayment {
+  id        String   @id @default(uuid())
+  loanId    String
+  amount    Float
+  date      DateTime @default(now())
+  loan      Loan     @relation(fields: [loanId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model UssdSession {
+  id        String           @id @default(uuid())
+  sessionId String           @unique
+  userId    String?
+  state     UssdSessionState @default(OPEN)
+  data      Json?
+  user      User?            @relation(fields: [userId], references: [id])
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+model Notification {
+  id          String              @id @default(uuid())
+  recipientId String
+  type        NotificationType
+  message     String
+  channel     NotificationChannel
+  status      NotificationStatus  @default(PENDING)
+  retryCount  Int                 @default(0)
+  recipient   User                @relation(fields: [recipientId], references: [id])
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model NotificationSetting {
+  id      String           @id @default(uuid())
+  userId  String
+  type    NotificationType
+  enabled Boolean          @default(true)
+  user    User             @relation(fields: [userId], references: [id])
+
+  @@unique([userId, type])
+}
+
+model Lender {
+  id              String   @id @default(uuid())
+  institutionName String
+  licenseNumber   String
+  email           String   @unique
+  password        String
+  isApproved      Boolean  @default(false)
+  isSuspended     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model GroupSubscription {
+  id                   String             @id @default(uuid())
+  groupId              String
+  tier                 SubscriptionTier
+  memberCountAtBilling Int
+  amountDue            Float
+  currency             String             @default("RWF")
+  billingDate          DateTime
+  status               SubscriptionStatus @default(TRIAL)
+  trialEndsAt          DateTime?
+  lastPaidAt           DateTime?
+  nextBillingDate      DateTime
+
+  group    Group                 @relation(fields: [groupId], references: [id])
+  payments SubscriptionPayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SubscriptionPayment {
+  id                String        @id @default(uuid())
+  groupId           String
+  subscriptionId    String
+  treasurerId       String
+  amountPaid        Float
+  momoTransactionId String?
+  status            PaymentStatus @default(PENDING)
+  attemptNumber     Int           @default(1)
+  paidAt            DateTime?
+
+  group        Group             @relation(fields: [groupId], references: [id])
+  subscription GroupSubscription @relation(fields: [subscriptionId], references: [id])
+  treasurer    User              @relation(fields: [treasurerId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Dispute {
+  id               String        @id @default(uuid())
+  groupId          String
+  raiserId         String
+  weekNumber       Int
+  claimDescription String
+  momoReference    String?
+  status           DisputeStatus @default(OPEN)
+  resolutionNote   String?
+
+  group  Group @relation(fields: [groupId], references: [id])
+  raiser User  @relation(fields: [raiserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ActivityFeedEvent {
+  id        String   @id @default(uuid())
+  groupId   String
+  type      String
+  data      Json
+  group     Group    @relation(fields: [groupId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actionType String
+  targetId   String?
+  metadata   Json?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  createdAt  DateTime @default(now())
+}
