@@ -94,21 +94,30 @@ export class NotificationsService {
   @Cron('0 8 * * 6') // Every Saturday at 08:00 (day before Sunday deadline)
   async sendWeeklyReminders() {
     this.logger.log('Sending weekly contribution reminders...');
+    const pageSize = 1000;
+    let cursor: string | null = null;
 
-    const pendingContributions = await this.prisma.contribution.findMany({
-      where: { status: 'PENDING' },
-      include: { user: { select: { id: true } }, group: { select: { name: true } } },
-    });
+    while (true) {
+      const pendingContributions = await this.prisma.contribution.findMany({
+        where: { status: 'PENDING' },
+        include: { user: { select: { id: true } }, group: { select: { name: true } } },
+        orderBy: { id: 'asc' },
+        take: pageSize,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      });
 
-    await Promise.all(
-      pendingContributions.map((c) =>
-        this.sendNotification(
+      if (pendingContributions.length === 0) break;
+
+      for (const c of pendingContributions) {
+        await this.sendNotification(
           c.user.id,
           NotificationType.WEEKLY_REMINDER,
           `Reminder: Your contribution of ${c.amount} RWF for group "${c.group.name}" is due tomorrow.`,
           NotificationChannel.SMS,
-        ),
-      ),
-    );
+        );
+      }
+
+      cursor = pendingContributions[pendingContributions.length - 1].id;
+    }
   }
 }

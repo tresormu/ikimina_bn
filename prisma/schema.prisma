@@ -83,6 +83,7 @@ enum SubscriptionTier {
   GROWTH
   COMMUNITY
   ENTERPRISE
+  MEGA
 }
 
 enum SubscriptionStatus {
@@ -113,7 +114,6 @@ model User {
   groupMembers         GroupMember[]
   contributions        Contribution[]
   loansRequested       Loan[]
-  loanVotes            LoanVote[]
   notifications        Notification[]
   notificationSettings NotificationSetting[]
   sharedCreditReports  SharedCreditReport[]
@@ -121,6 +121,7 @@ model User {
   ussdSessions         UssdSession[]
   auditLogs            AuditLog[]
   subscriptionPayments SubscriptionPayment[]
+  memberPenalties      MemberPenalty[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -131,7 +132,12 @@ model OtpRecord {
   phoneNumber String
   hashedOtp   String
   expiresAt   DateTime
+  failedAttempts Int   @default(0)
+  lockedUntil DateTime?
   createdAt   DateTime @default(now())
+
+  @@index([phoneNumber, createdAt])
+  @@index([expiresAt])
 }
 
 model RefreshToken {
@@ -142,6 +148,9 @@ model RefreshToken {
   revoked   Boolean  @default(false)
   user      User     @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())
+
+  @@index([userId, revoked, expiresAt])
+  @@index([expiresAt])
 }
 
 model Group {
@@ -150,6 +159,9 @@ model Group {
   contributionAmount Float
   frequency          GroupFrequency
   inviteCode         String             @unique
+  bankName           String?
+  bankAccountName    String?
+  bankAccountNumber  String?
   subscriptionStatus SubscriptionStatus @default(TRIAL)
   isSuspended        Boolean            @default(false)
   suspendedAt        DateTime?
@@ -165,6 +177,8 @@ model Group {
   subscriptionPayments SubscriptionPayment[]
   disputes             Dispute[]
   feedEvents           ActivityFeedEvent[]
+  penaltyRules         PenaltyRule[]
+  memberPenalties      MemberPenalty[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -182,6 +196,8 @@ model GroupMember {
   user  User  @relation(fields: [userId], references: [id])
 
   @@unique([groupId, userId])
+  @@index([userId, isActive])
+  @@index([groupId, role, isActive])
 }
 
 model GroupInviteCode {
@@ -211,6 +227,7 @@ model Contribution {
   weekNumber        Int
   status            ContributionStatus @default(PENDING)
   momoTransactionId String?
+  bankReference     String?
   failureReason     String?
 
   group Group @relation(fields: [groupId], references: [id])
@@ -218,6 +235,11 @@ model Contribution {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([groupId, weekNumber, status])
+  @@index([groupId, userId, weekNumber])
+  @@unique([groupId, userId, weekNumber, bankReference])
 }
 
 model CreditScore {
@@ -236,6 +258,8 @@ model CreditScoreHistory {
   label     String
   breakdown Json
   timestamp DateTime @default(now())
+
+  @@index([userId, timestamp])
 }
 
 model SharedCreditReport {
@@ -265,26 +289,61 @@ model Loan {
   reason      String
   status      LoanStatus @default(PENDING)
   disbursedAt DateTime?
+  decidedById String?
+  decisionNote String?
 
   group      Group           @relation(fields: [groupId], references: [id])
   requester  User            @relation(fields: [requesterId], references: [id])
-  votes      LoanVote[]
   repayments LoanRepayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([requesterId, status, createdAt])
+  @@index([groupId, status, createdAt])
+}
+
+enum MemberPenaltyStatus {
+  PENDING
+  PAID
+}
+
+model PenaltyRule {
+  id          String  @id @default(uuid())
+  groupId     String
+  name        String
+  description String?
+  amount      Float
+  isActive    Boolean @default(true)
+  createdById String
+
+  group Group @relation(fields: [groupId], references: [id])
+  memberPenalties MemberPenalty[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-model LoanVote {
-  id        String   @id @default(uuid())
-  loanId    String
-  voterId   String
-  vote      String // APPROVE or DECLINE
-  loan      Loan     @relation(fields: [loanId], references: [id])
-  voter     User     @relation(fields: [voterId], references: [id])
-  createdAt DateTime @default(now())
+model MemberPenalty {
+  id             String              @id @default(uuid())
+  groupId        String
+  userId         String
+  penaltyRuleId  String
+  assignedById   String
+  status         MemberPenaltyStatus @default(PENDING)
+  bankReference  String?
+  paidAt         DateTime?
+  note           String?
 
-  @@unique([loanId, voterId])
+  group Group @relation(fields: [groupId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+  penaltyRule PenaltyRule @relation(fields: [penaltyRuleId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, groupId, status])
+  @@index([groupId, status, createdAt])
 }
 
 model LoanRepayment {
@@ -305,6 +364,9 @@ model UssdSession {
   user      User?            @relation(fields: [userId], references: [id])
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
+
+  @@index([userId, updatedAt])
+  @@index([state, updatedAt])
 }
 
 model Notification {
@@ -318,6 +380,9 @@ model Notification {
   recipient   User                @relation(fields: [recipientId], references: [id])
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
+
+  @@index([recipientId, createdAt])
+  @@index([status, createdAt])
 }
 
 model NotificationSetting {
@@ -360,6 +425,9 @@ model GroupSubscription {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([groupId, createdAt])
+  @@index([status, nextBillingDate])
 }
 
 model SubscriptionPayment {
@@ -379,6 +447,19 @@ model SubscriptionPayment {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([groupId, createdAt])
+  @@index([subscriptionId, createdAt])
+  @@index([status, createdAt])
+}
+
+model JobLock {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  owner       String
+  lockedUntil DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Dispute {

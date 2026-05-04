@@ -142,6 +142,18 @@ export class LendersService {
       throw new ForbiddenException('User is not part of any group with an active subscription. Credit report unavailable.');
     }
 
+    const sharedConsent = await this.prisma.sharedCreditReport.findFirst({
+      where: {
+        userId: user.id,
+        revoked: false,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    if (!sharedConsent) {
+      throw new ForbiddenException('Member consent is required before lenders can access this report.');
+    }
+
     const score = await this.prisma.creditScore.findUnique({ where: { userId: user.id } });
 
     // Under new monetization, lenders get FREE access to the full report 

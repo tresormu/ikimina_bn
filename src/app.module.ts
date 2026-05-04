@@ -4,7 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
+import { UsersModule } from './subscriptions/users/users.module';
 import { GroupsModule } from './groups/groups.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { ContributionsModule } from './contributions/contributions.module';

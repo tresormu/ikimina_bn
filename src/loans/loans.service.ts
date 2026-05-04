@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestLoanDto } from './dto/request-loan.dto';
-import { VoteLoanDto } from './dto/vote-loan.dto';
+import { DecideLoanDto } from './dto/decide-loan.dto';
 import { RepayLoanDto } from './dto/repay-loan.dto';
 import { LoanStatus, Role } from '@prisma/client';
 
@@ -58,82 +58,30 @@ export class LoansService {
     });
   }
 
-  async getPendingVotes(userId: string) {
-    // Find groups the user is in
-    const memberships = await this.prisma.groupMember.findMany({
-      where: { userId, isActive: true },
-      select: { groupId: true }
-    });
-
-    const groupIds = memberships.map(m => m.groupId);
-
-    // Find pending loans in those groups where the user hasn't voted yet
-    return this.prisma.loan.findMany({
-      where: {
-        groupId: { in: groupIds },
-        status: LoanStatus.PENDING,
-        votes: {
-          none: { voterId: userId }
-        }
-      },
-      include: { 
-        requester: { select: { fullName: true } },
-        group: { select: { name: true } } 
-      }
-    });
-  }
-
-  async vote(loanId: string, userId: string, dto: VoteLoanDto) {
+  async decideLoan(loanId: string, userId: string, dto: DecideLoanDto) {
     const loan = await this.prisma.loan.findUnique({ where: { id: loanId } });
     if (!loan) throw new NotFoundException('Loan not found');
     if (loan.status !== LoanStatus.PENDING) throw new BadRequestException('Loan is no longer pending');
 
-    const membership = await this.prisma.groupMember.findUnique({
-      where: { groupId_userId: { groupId: loan.groupId, userId } }
+    await this.ensureTreasurer(loan.groupId, userId);
+
+    const approved = dto.decision === 'APPROVED';
+    const updatedLoan = await this.prisma.loan.update({
+      where: { id: loanId },
+      data: {
+        status: approved ? LoanStatus.APPROVED : LoanStatus.DECLINED,
+        disbursedAt: approved ? new Date() : null,
+        decidedById: userId,
+        decisionNote: dto.note,
+      },
     });
 
-    if (!membership || !membership.isActive) throw new ForbiddenException('Not an active member of the group');
-
-    // Create vote
-    await this.prisma.loanVote.create({
-      data: { loanId, voterId: userId, vote: dto.vote }
-    });
-
-    // Check if majority reached
-    const totalActiveMembers = await this.prisma.groupMember.count({
-      where: { groupId: loan.groupId, isActive: true }
-    });
-
-    const approvals = await this.prisma.loanVote.count({
-      where: { loanId, vote: 'APPROVE' }
-    });
-
-    const rejections = await this.prisma.loanVote.count({
-      where: { loanId, vote: 'DECLINE' }
-    });
-
-    const majority = Math.floor(totalActiveMembers / 2) + 1;
-
-    let updatedLoan = loan;
-
-    if (approvals >= majority) {
-      updatedLoan = await this.prisma.loan.update({
-        where: { id: loanId },
-        data: { status: LoanStatus.APPROVED, disbursedAt: new Date() }
-      });
-      // Mock Disbursement
+    if (approved) {
       const requester = await this.prisma.user.findUnique({ where: { id: loan.requesterId } });
-      this.logger.log(`[MOCK MOMO] Disbursing ${loan.amount} to ${requester?.phoneNumber}`);
-      // TODO: Notify Requester and Treasurer
-    } else if (rejections >= majority) {
-      updatedLoan = await this.prisma.loan.update({
-        where: { id: loanId },
-        data: { status: LoanStatus.DECLINED }
-      });
-      // TODO: Notify Requester
+      this.logger.log(`[MOCK BANK DISBURSEMENT] Disbursing ${loan.amount} to ${requester?.phoneNumber} from group treasury account`);
     }
 
-    return { message: 'Vote recorded', loan: updatedLoan };
+    return { message: `Loan ${approved ? 'approved' : 'declined'} by group staff`, loan: updatedLoan };
   }
 
   async repay(loanId: string, treasurerId: string, dto: RepayLoanDto) {
@@ -151,8 +99,11 @@ export class LoansService {
     });
 
     // Check if fully repaid
-    const allRepayments = await this.prisma.loanRepayment.findMany({ where: { loanId } });
-    const totalRepaid = allRepayments.reduce((sum, r) => sum + r.amount, 0);
+    const aggregate = await this.prisma.loanRepayment.aggregate({
+      where: { loanId },
+      _sum: { amount: true },
+    });
+    const totalRepaid = aggregate._sum.amount ?? 0;
 
     if (totalRepaid >= loan.amount) {
       await this.prisma.loan.update({

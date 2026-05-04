@@ -39,7 +39,7 @@ export class ContributionsController {
 
   @Get('history/group/:groupId')
   @ApiOperation({ summary: 'Get full group contribution history' })
-  getGroupHistory(@Param('groupId') groupId: string) {
-    return this.contributionsService.getGroupHistory(groupId);
+  getGroupHistory(@Param('groupId') groupId: string, @CurrentUser() user: User) {
+    return this.contributionsService.getGroupHistory(groupId, user.id);
   }
 }

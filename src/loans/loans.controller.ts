@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Body, UseGuards } from '@nestjs/common';
 import { LoansService } from './loans.service';
 import { RequestLoanDto } from './dto/request-loan.dto';
-import { VoteLoanDto } from './dto/vote-loan.dto';
+import { DecideLoanDto } from './dto/decide-loan.dto';
 import { RepayLoanDto } from './dto/repay-loan.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -33,16 +33,10 @@ export class LoansController {
     return this.loansService.getGroupLoans(groupId, user.id);
   }
 
-  @Get('votes/pending')
-  @ApiOperation({ summary: 'List loan requests awaiting user vote' })
-  getPendingVotes(@CurrentUser() user: User) {
-    return this.loansService.getPendingVotes(user.id);
-  }
-
-  @Post(':loanId/vote')
-  @ApiOperation({ summary: 'Cast vote on a pending loan' })
-  vote(@Param('loanId') loanId: string, @CurrentUser() user: User, @Body() dto: VoteLoanDto) {
-    return this.loansService.vote(loanId, user.id, dto);
+  @Post(':loanId/decision')
+  @ApiOperation({ summary: 'Treasurer approves or declines a pending loan request' })
+  decideLoan(@Param('loanId') loanId: string, @CurrentUser() user: User, @Body() dto: DecideLoanDto) {
+    return this.loansService.decideLoan(loanId, user.id, dto);
   }
 
   @Post(':loanId/repay')

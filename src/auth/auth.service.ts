@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -6,9 +6,12 @@ import * as bcrypt from 'bcrypt';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -51,11 +54,12 @@ export class AuthService {
         phoneNumber: dto.phoneNumber,
         hashedOtp,
         expiresAt,
+        failedAttempts: 0,
       },
     });
 
     // 4. Mock sending SMS via Africa's Talking
-    console.log(`[MOCK SMS] To: ${dto.phoneNumber} - Your IkiminaPass OTP is ${rawOtp}`);
+    this.logger.log(`[MOCK SMS] OTP generated for ${dto.phoneNumber}`);
 
     return { message: 'OTP sent successfully' };
   }
@@ -71,12 +75,27 @@ export class AuthService {
       throw new BadRequestException({ errorCode: 'INVALID_OTP', message: 'No OTP found' });
     }
 
+    if (record.lockedUntil && record.lockedUntil > new Date()) {
+      throw new BadRequestException({
+        errorCode: 'OTP_LOCKED',
+        message: 'Too many failed attempts. Please request a new OTP later.',
+      });
+    }
+
     if (record.expiresAt < new Date()) {
       throw new BadRequestException({ errorCode: 'OTP_EXPIRED', message: 'OTP has expired' });
     }
 
     const isValid = await bcrypt.compare(dto.otp, record.hashedOtp);
     if (!isValid) {
+      const nextAttempts = record.failedAttempts + 1;
+      await this.prisma.otpRecord.update({
+        where: { id: record.id },
+        data: {
+          failedAttempts: nextAttempts,
+          lockedUntil: nextAttempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null,
+        },
+      });
       throw new BadRequestException({ errorCode: 'INVALID_OTP', message: 'Invalid OTP' });
     }
 
@@ -162,5 +181,16 @@ export class AuthService {
       refreshToken,
       isNewUser,
     };
+  }
+
+  @Cron('0 */6 * * *')
+  async cleanupAuthArtifacts() {
+    const now = new Date();
+    await this.prisma.otpRecord.deleteMany({
+      where: { expiresAt: { lt: now } },
+    });
+    await this.prisma.refreshToken.deleteMany({
+      where: { OR: [{ expiresAt: { lt: now } }, { revoked: true }] },
+    });
   }
 }

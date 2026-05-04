@@ -21,7 +21,7 @@ export const SUBSCRIPTION_TIERS = [
   { tier: SubscriptionTier.STARTER, min: 1, max: 10, price: 5000 },
   { tier: SubscriptionTier.GROWTH, min: 11, max: 25, price: 10500 },
   { tier: SubscriptionTier.COMMUNITY, min: 26, max: 50, price: 25000 },
-  { tier: SubscriptionTier.ENTERPRISE, min: 51, max: Infinity, price: 32000 },
+  { tier: SubscriptionTier.ENTERPRISE, min: 51, max: 999999, price: 32000 },
 ] as const;
 
 const GRACE_PERIOD_DAYS = 5;
@@ -38,6 +38,34 @@ export class SubscriptionsService {
 
   getTiers() {
     return SUBSCRIPTION_TIERS;
+  }
+
+  private async acquireJobLock(name: string, minutes = 15) {
+    const now = new Date();
+    const lockUntil = new Date(now.getTime() + minutes * 60 * 1000);
+    const existing = await this.prisma.jobLock.findUnique({ where: { name } });
+
+    if (!existing) {
+      await this.prisma.jobLock.create({
+        data: { name, owner: process.pid.toString(), lockedUntil: lockUntil },
+      });
+      return true;
+    }
+
+    if (existing.lockedUntil > now) return false;
+
+    await this.prisma.jobLock.update({
+      where: { name },
+      data: { owner: process.pid.toString(), lockedUntil: lockUntil },
+    });
+    return true;
+  }
+
+  private async releaseJobLock(name: string) {
+    await this.prisma.jobLock.updateMany({
+      where: { name, owner: process.pid.toString() },
+      data: { lockedUntil: new Date() },
+    });
   }
 
   async getGroupSubscription(groupId: string, userId: string) {
@@ -163,8 +191,9 @@ export class SubscriptionsService {
     if (!currentSub || currentSub.tier === tierConfig.tier) return;
 
     const previousTier = currentSub.tier;
-    const tierOrder = SUBSCRIPTION_TIERS.map((t) => t.tier);
-    const isUpgrade = tierOrder.indexOf(tierConfig.tier) > tierOrder.indexOf(previousTier);
+    const tierOrder = SUBSCRIPTION_TIERS.map((t) => t.tier as string);
+    const isUpgrade =
+      tierOrder.indexOf(tierConfig.tier as string) > tierOrder.indexOf(previousTier as string);
 
     await this.prisma.groupSubscription.update({
       where: { id: currentSub.id },
@@ -202,6 +231,9 @@ export class SubscriptionsService {
   // Daily 08:00 — initiate billing for groups whose nextBillingDate is today
   @Cron('0 8 * * *')
   async handleDailyBilling() {
+    const lockName = 'subscriptions:daily_billing';
+    if (!(await this.acquireJobLock(lockName))) return;
+    try {
     this.logger.log('Running daily billing cron...');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -279,11 +311,17 @@ export class SubscriptionsService {
         );
       }
     }
+    } finally {
+      await this.releaseJobLock(lockName);
+    }
   }
 
   // Daily 09:00 — send daily reminders to treasurers of OVERDUE groups
   @Cron('0 9 * * *')
   async handleGracePeriodReminders() {
+    const lockName = 'subscriptions:grace_reminders';
+    if (!(await this.acquireJobLock(lockName))) return;
+    try {
     this.logger.log('Sending grace period reminders...');
 
     const overdueSubs = await this.prisma.groupSubscription.findMany({
@@ -306,11 +344,17 @@ export class SubscriptionsService {
         NotificationChannel.SMS,
       );
     }
+    } finally {
+      await this.releaseJobLock(lockName);
+    }
   }
 
   // Daily 06:00 — warn treasurers whose trial ends in 7 days
   @Cron('0 6 * * *')
   async handleTrialWarnings() {
+    const lockName = 'subscriptions:trial_warnings';
+    if (!(await this.acquireJobLock(lockName))) return;
+    try {
     this.logger.log('Checking trial expiry warnings...');
 
     const in7Days = new Date();
@@ -341,11 +385,17 @@ export class SubscriptionsService {
         NotificationChannel.SMS,
       );
     }
+    } finally {
+      await this.releaseJobLock(lockName);
+    }
   }
 
   // Daily 10:00 — suspend groups whose grace period (5 days overdue) has expired
   @Cron('0 10 * * *')
   async handleSuspensions() {
+    const lockName = 'subscriptions:suspensions';
+    if (!(await this.acquireJobLock(lockName))) return;
+    try {
     this.logger.log('Checking for groups to suspend...');
 
     const graceCutoff = new Date();
@@ -394,11 +444,17 @@ export class SubscriptionsService {
 
       this.logger.log(`Group ${sub.groupId} suspended due to non-payment`);
     }
+    } finally {
+      await this.releaseJobLock(lockName);
+    }
   }
 
   // Daily 08:00 — 7 days before billing date, send payment due reminder
   @Cron('0 8 * * *')
   async handleBillingReminders() {
+    const lockName = 'subscriptions:billing_reminders';
+    if (!(await this.acquireJobLock(lockName))) return;
+    try {
     const in7Days = new Date();
     in7Days.setDate(in7Days.getDate() + 7);
     const in8Days = new Date(in7Days);
@@ -426,6 +482,9 @@ export class SubscriptionsService {
         `Reminder: Your group "${sub.group.name}" subscription of ${sub.amountDue} RWF is due in 7 days.`,
         NotificationChannel.SMS,
       );
+    }
+    } finally {
+      await this.releaseJobLock(lockName);
     }
   }
 

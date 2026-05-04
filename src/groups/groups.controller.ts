@@ -3,6 +3,8 @@ import { GroupsService } from './groups.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { UpdateRotationDto } from './dto/update-rotation.dto';
+import { CreatePenaltyRuleDto } from './dto/create-penalty-rule.dto';
+import { AssignPenaltyDto } from './dto/assign-penalty.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -96,5 +98,29 @@ export class GroupsController {
   @ApiOperation({ summary: 'Treasurer posts an announcement' })
   postAnnouncement(@Param('id') id: string, @CurrentUser() user: User, @Body('message') message: string) {
     return this.groupsService.postAnnouncement(id, user.id, message);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/invite-code/regenerate')
+  @ApiOperation({ summary: 'Treasurer regenerates a new 24h invite code for the group' })
+  regenerateInviteCode(@Param('id') groupId: string, @CurrentUser() user: User) {
+    return this.groupsService.regenerateInviteCode(groupId, user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/penalty-rules')
+  @ApiOperation({ summary: 'Treasurer creates a group penalty rule' })
+  createPenaltyRule(@Param('id') groupId: string, @CurrentUser() user: User, @Body() dto: CreatePenaltyRuleDto) {
+    return this.groupsService.createPenaltyRule(groupId, user.id, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/penalties')
+  @ApiOperation({ summary: 'Treasurer assigns a penalty to a member' })
+  assignPenalty(@Param('id') groupId: string, @CurrentUser() user: User, @Body() dto: AssignPenaltyDto) {
+    return this.groupsService.assignPenalty(groupId, user.id, dto);
   }
 }

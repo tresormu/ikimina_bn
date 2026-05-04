@@ -1,8 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubmitContributionDto } from './dto/submit-contribution.dto';
-import { ContributionStatus } from '@prisma/client';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { ContributionStatus, GroupFrequency } from '@prisma/client';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class ContributionsService {
@@ -11,6 +11,7 @@ export class ContributionsService {
   constructor(private prisma: PrismaService) {}
 
   async getCurrentOwed(groupId: string, userId: string) {
+    await this.ensureActiveMember(groupId, userId);
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
       include: {
@@ -20,9 +21,7 @@ export class ContributionsService {
 
     if (!group) throw new NotFoundException('Group not found');
 
-    // Basic mock logic to calculate "current week"
-    // In reality, this depends on group creation date and frequency
-    const currentWeek = 1; 
+    const currentWeek = this.calculateCurrentCycleWeek(group.createdAt, group.frequency);
 
     // Find who gets the pot this week
     const lastRotation = group.rotationLogs[0];
@@ -51,12 +50,13 @@ export class ContributionsService {
   }
 
   async submit(groupId: string, userId: string, dto: SubmitContributionDto) {
+    await this.ensureActiveMember(groupId, userId);
     const group = await this.prisma.group.findUnique({ where: { id: groupId } });
     if (!group) throw new NotFoundException('Group not found');
     if (group.isSuspended) throw new BadRequestException('Group is suspended. Contributions are not accepted.');
 
-    // Determine current week
-    const currentWeek = 1;
+    // Determine current cycle week from group age and configured frequency.
+    const currentWeek = this.calculateCurrentCycleWeek(group.createdAt, group.frequency);
 
     // Mock verification with MTN MoMo
     this.logger.log(`Verifying MoMo TX ${dto.momoTransactionId} for User ${userId}`);
@@ -72,7 +72,7 @@ export class ContributionsService {
         groupId,
         userId,
         weekNumber: currentWeek,
-        amount: 0, // Should be fetched from group.contributionAmount
+        amount: group.contributionAmount,
         status,
         momoTransactionId: dto.momoTransactionId,
         failureReason,
@@ -95,6 +95,8 @@ export class ContributionsService {
     if (!contribution || contribution.userId !== userId) {
       throw new NotFoundException('Contribution not found');
     }
+
+    await this.ensureActiveMember(contribution.groupId, userId);
 
     if (contribution.status === ContributionStatus.CONFIRMED) {
       throw new BadRequestException('Contribution already confirmed');
@@ -129,12 +131,35 @@ export class ContributionsService {
     });
   }
 
-  async getGroupHistory(groupId: string) {
+  async getGroupHistory(groupId: string, userId: string) {
+    await this.ensureActiveMember(groupId, userId);
     return this.prisma.contribution.findMany({
       where: { groupId },
       include: { user: { select: { fullName: true, phoneNumber: true } } },
       orderBy: { createdAt: 'desc' }
     });
+  }
+
+  private async ensureActiveMember(groupId: string, userId: string) {
+    const membership = await this.prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+    });
+    if (!membership || !membership.isActive) {
+      throw new ForbiddenException('You must be an active member of this group');
+    }
+  }
+
+  private calculateCurrentCycleWeek(groupCreatedAt: Date, frequency: GroupFrequency): number {
+    const now = Date.now();
+    const elapsedMs = Math.max(0, now - groupCreatedAt.getTime());
+    const dayMs = 24 * 60 * 60 * 1000;
+    const elapsedDays = Math.floor(elapsedMs / dayMs);
+
+    const cycleDays =
+      frequency === GroupFrequency.WEEKLY ? 7 :
+      frequency === GroupFrequency.BIWEEKLY ? 14 : 30;
+
+    return Math.floor(elapsedDays / cycleDays) + 1;
   }
 
   @Cron('0 23 * * 0') // Example: Every Sunday at 11 PM
