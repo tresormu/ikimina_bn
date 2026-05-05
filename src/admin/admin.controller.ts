@@ -8,8 +8,6 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
 import type { User } from '@prisma/client';
 import {
-  ApproveRejectLenderDto,
-  RejectLenderDto,
   SuspendGroupDto,
   ResolveDisputeAdminDto,
   PlatformAnnouncementDto,
@@ -29,30 +27,6 @@ export class AdminController {
   @ApiOperation({ summary: 'List all groups with activity status' })
   getAllGroups() {
     return this.adminService.getAllGroups();
-  }
-
-  @Get('lenders')
-  @ApiOperation({ summary: 'List all lenders with approval status' })
-  getAllLenders() {
-    return this.adminService.getAllLenders();
-  }
-
-  @Patch('lenders/:id/approve')
-  @ApiOperation({ summary: 'Approve a lender' })
-  approveLender(@Param('id') id: string, @Body() dto: ApproveRejectLenderDto) {
-    return this.adminService.approveLender(id, dto);
-  }
-
-  @Patch('lenders/:id/reject')
-  @ApiOperation({ summary: 'Reject a lender with reason' })
-  rejectLender(@Param('id') id: string, @Body() dto: RejectLenderDto) {
-    return this.adminService.rejectLender(id, dto);
-  }
-
-  @Patch('lenders/:id/suspend')
-  @ApiOperation({ summary: 'Suspend a lender account' })
-  suspendLender(@Param('id') id: string) {
-    return this.adminService.suspendLender(id);
   }
 
   @Patch('groups/:id/suspend')

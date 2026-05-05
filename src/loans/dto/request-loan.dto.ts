@@ -1,5 +1,5 @@
-import { IsString, IsNotEmpty, IsNumber, Min } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsNotEmpty, IsNumber, Min, IsOptional, Max } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RequestLoanDto {
   @ApiProperty({ example: 'groupId-uuid' })
@@ -16,4 +16,11 @@ export class RequestLoanDto {
   @IsString()
   @IsNotEmpty()
   reason: string;
+
+  @ApiPropertyOptional({ example: 3, description: 'Number of months to repay' })
+  @IsNumber()
+  @Min(1)
+  @Max(24)
+  @IsOptional()
+  repaymentMonths?: number;
 }

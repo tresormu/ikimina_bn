@@ -19,6 +19,12 @@ export class DisputesController {
     return this.disputesService.create(user.id, dto);
   }
 
+  @Get('my')
+  @ApiOperation({ summary: 'View own disputes' })
+  getMyDisputes(@CurrentUser() user: User) {
+    return this.disputesService.getMyDisputes(user.id);
+  }
+
   @Get('group/:groupId')
   @ApiOperation({ summary: 'Treasurer views all disputes in group' })
   getGroupDisputes(@Param('groupId') groupId: string, @CurrentUser() user: User) {

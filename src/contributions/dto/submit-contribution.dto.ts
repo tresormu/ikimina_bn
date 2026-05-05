@@ -1,9 +1,14 @@
-import { IsString, IsNotEmpty } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsOptional, ValidateIf } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SubmitContributionDto {
-  @ApiProperty({ example: 'TX123456789' })
+  @ApiPropertyOptional({ example: 'TX123456789' })
   @IsString()
-  @IsNotEmpty()
-  momoTransactionId: string;
+  @IsOptional()
+  momoTransactionId?: string;
+
+  @ApiPropertyOptional({ example: 'BNK-REF-001' })
+  @IsString()
+  @IsOptional()
+  bankReference?: string;
 }

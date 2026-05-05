@@ -3,8 +3,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationChannel, NotificationType, SubscriptionStatus } from '@prisma/client';
 import {
-  ApproveRejectLenderDto,
-  RejectLenderDto,
   SuspendGroupDto,
   ResolveDisputeAdminDto,
   PlatformAnnouncementDto,
@@ -29,57 +27,6 @@ export class AdminService {
     });
   }
 
-  async getAllLenders() {
-    return this.prisma.lender.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
-  }
-
-  async approveLender(id: string, dto: ApproveRejectLenderDto) {
-    const lender = await this.prisma.lender.findUnique({ where: { id } });
-    if (!lender) throw new NotFoundException('Lender not found');
-
-    await this.prisma.lender.update({
-      where: { id },
-      data: { isApproved: true },
-    });
-
-    await this.prisma.auditLog.create({
-      data: { actionType: 'LENDER_APPROVED', targetId: id, metadata: { note: dto.note } },
-    });
-
-    return { message: 'Lender approved' };
-  }
-
-  async rejectLender(id: string, dto: RejectLenderDto) {
-    const lender = await this.prisma.lender.findUnique({ where: { id } });
-    if (!lender) throw new NotFoundException('Lender not found');
-
-    await this.prisma.lender.update({
-      where: { id },
-      data: { isApproved: false },
-    });
-
-    await this.prisma.auditLog.create({
-      data: { actionType: 'LENDER_REJECTED', targetId: id, metadata: { reason: dto.reason } },
-    });
-
-    return { message: 'Lender rejected' };
-  }
-
-  async suspendLender(id: string) {
-    const lender = await this.prisma.lender.findUnique({ where: { id } });
-    if (!lender) throw new NotFoundException('Lender not found');
-
-    await this.prisma.lender.update({ where: { id }, data: { isSuspended: true } });
-
-    await this.prisma.auditLog.create({
-      data: { actionType: 'LENDER_SUSPENDED', targetId: id },
-    });
-
-    return { message: 'Lender suspended' };
-  }
-
   async suspendGroup(id: string, dto: SuspendGroupDto) {
     const group = await this.prisma.group.findUnique({ where: { id } });
     if (!group) throw new NotFoundException('Group not found');
@@ -99,7 +46,6 @@ export class AdminService {
       data: { status: SubscriptionStatus.SUSPENDED },
     });
 
-    // Notify all active members
     const members = await this.prisma.groupMember.findMany({
       where: { groupId: id, isActive: true },
       select: { userId: true },
@@ -160,42 +106,24 @@ export class AdminService {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-    const [
-      totalAllTime,
-      totalThisMonth,
-      totalLastMonth,
-      byTier,
-      groupsPerTier,
-      trialCount,
-      suspendedCount,
-    ] = await Promise.all([
-      this.prisma.subscriptionPayment.aggregate({
-        where: { status: 'CONFIRMED' },
-        _sum: { amountPaid: true },
-      }),
-      this.prisma.subscriptionPayment.aggregate({
-        where: { status: 'CONFIRMED', paidAt: { gte: startOfMonth } },
-        _sum: { amountPaid: true },
-      }),
-      this.prisma.subscriptionPayment.aggregate({
-        where: {
-          status: 'CONFIRMED',
-          paidAt: { gte: startOfLastMonth, lt: startOfMonth },
-        },
-        _sum: { amountPaid: true },
-      }),
-      this.prisma.subscriptionPayment.groupBy({
-        by: ['subscriptionId'],
-        where: { status: 'CONFIRMED' },
-        _sum: { amountPaid: true },
-      }),
-      this.prisma.groupSubscription.groupBy({
-        by: ['tier'],
-        _count: { id: true },
-      }),
-      this.prisma.groupSubscription.count({ where: { status: SubscriptionStatus.TRIAL } }),
-      this.prisma.groupSubscription.count({ where: { status: SubscriptionStatus.SUSPENDED } }),
-    ]);
+    const [totalAllTime, totalThisMonth, totalLastMonth, groupsPerTier, trialCount, suspendedCount] =
+      await Promise.all([
+        this.prisma.subscriptionPayment.aggregate({
+          where: { status: 'CONFIRMED' },
+          _sum: { amountPaid: true },
+        }),
+        this.prisma.subscriptionPayment.aggregate({
+          where: { status: 'CONFIRMED', paidAt: { gte: startOfMonth } },
+          _sum: { amountPaid: true },
+        }),
+        this.prisma.subscriptionPayment.aggregate({
+          where: { status: 'CONFIRMED', paidAt: { gte: startOfLastMonth, lt: startOfMonth } },
+          _sum: { amountPaid: true },
+        }),
+        this.prisma.groupSubscription.groupBy({ by: ['tier'], _count: { id: true } }),
+        this.prisma.groupSubscription.count({ where: { status: SubscriptionStatus.TRIAL } }),
+        this.prisma.groupSubscription.count({ where: { status: SubscriptionStatus.SUSPENDED } }),
+      ]);
 
     const thisMonthRevenue = totalThisMonth._sum.amountPaid ?? 0;
     const lastMonthRevenue = totalLastMonth._sum.amountPaid ?? 0;
@@ -204,7 +132,6 @@ export class AdminService {
         ? (((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100).toFixed(2)
         : null;
 
-    // Revenue breakdown by tier — join subscription payments with their subscription tier
     const tierRevenue = await this.prisma.$queryRaw<{ tier: string; total: number }[]>`
       SELECT gs.tier, SUM(sp."amountPaid") as total
       FROM "SubscriptionPayment" sp
@@ -255,7 +182,7 @@ export class AdminService {
       users.map((u) =>
         this.notifications.sendNotification(
           u.id,
-          NotificationType.WEEKLY_REMINDER, // reuse generic type for platform-wide
+          NotificationType.WEEKLY_REMINDER,
           dto.message,
           NotificationChannel.PUSH,
         ),

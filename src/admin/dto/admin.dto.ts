@@ -1,20 +1,6 @@
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class ApproveRejectLenderDto {
-  @ApiPropertyOptional({ example: 'All documents verified' })
-  @IsString()
-  @IsOptional()
-  note?: string;
-}
-
-export class RejectLenderDto {
-  @ApiProperty({ example: 'License number invalid' })
-  @IsString()
-  @IsNotEmpty()
-  reason: string;
-}
-
 export class SuspendGroupDto {
   @ApiProperty({ example: 'Fraudulent activity detected' })
   @IsString()

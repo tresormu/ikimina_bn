@@ -5,6 +5,7 @@ import { UpdateGroupDto } from './dto/update-group.dto';
 import { UpdateRotationDto } from './dto/update-rotation.dto';
 import { CreatePenaltyRuleDto } from './dto/create-penalty-rule.dto';
 import { AssignPenaltyDto } from './dto/assign-penalty.dto';
+import { UpdateConfigDto } from './dto/update-config.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -66,10 +67,74 @@ export class GroupsController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  @Get(':id/config')
+  @ApiOperation({ summary: 'Get full group configuration' })
+  getGroupConfig(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.groupsService.getGroupConfig(id, user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/config')
+  @ApiOperation({ summary: 'Update group configuration (treasurer only, audit logged)' })
+  updateGroupConfig(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: UpdateConfigDto) {
+    return this.groupsService.updateGroupConfig(id, user.id, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/health')
+  @ApiOperation({ summary: 'Get group health score and analytics' })
+  getGroupHealth(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.groupsService.getGroupHealth(id, user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/fund')
+  @ApiOperation({ summary: 'Get fund balance for ASCA/Hybrid groups' })
+  getGroupFund(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.groupsService.getGroupFund(id, user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/waitlist')
+  @ApiOperation({ summary: 'Join waiting list' })
+  joinWaitlist(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.groupsService.joinWaitlist(id, user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/waitlist')
+  @ApiOperation({ summary: 'View waiting list (treasurer only)' })
+  getWaitlist(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.groupsService.getWaitlist(id, user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/settle')
+  @ApiOperation({ summary: 'Initiate end-of-cycle settlement (ASCA/Hybrid groups)' })
+  settleCycle(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.groupsService.settleCycle(id, user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Patch(':id/rotation')
-  @ApiOperation({ summary: 'Treasurer reorders rotation' })
+  @ApiOperation({ summary: 'Treasurer sets rotation order for next cycle' })
   updateRotation(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: UpdateRotationDto) {
     return this.groupsService.updateRotation(id, user.id, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/rotation/advance')
+  @ApiOperation({ summary: 'Treasurer advances rotation after payout confirmed' })
+  advanceRotation(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.groupsService.advanceRotation(id, user.id);
   }
 
   @ApiBearerAuth()
@@ -79,7 +144,7 @@ export class GroupsController {
   deactivateMember(
     @Param('id') groupId: string,
     @Param('memberId') memberId: string,
-    @CurrentUser() user: User
+    @CurrentUser() user: User,
   ) {
     return this.groupsService.deactivateMember(groupId, memberId, user.id);
   }
@@ -103,7 +168,7 @@ export class GroupsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Post(':id/invite-code/regenerate')
-  @ApiOperation({ summary: 'Treasurer regenerates a new 24h invite code for the group' })
+  @ApiOperation({ summary: 'Treasurer regenerates a new 24h invite code' })
   regenerateInviteCode(@Param('id') groupId: string, @CurrentUser() user: User) {
     return this.groupsService.regenerateInviteCode(groupId, user.id);
   }

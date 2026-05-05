@@ -1,5 +1,6 @@
-import { IsString, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, IsOptional, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { DisputeType } from '@prisma/client';
 
 export class CreateDisputeDto {
   @ApiProperty()
@@ -10,6 +11,10 @@ export class CreateDisputeDto {
   @ApiProperty()
   @IsNumber()
   weekNumber: number;
+
+  @ApiProperty({ enum: DisputeType, default: DisputeType.CONTRIBUTION_NOT_RECORDED })
+  @IsEnum(DisputeType)
+  disputeType: DisputeType;
 
   @ApiProperty()
   @IsString()

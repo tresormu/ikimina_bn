@@ -11,7 +11,6 @@ enum Role {
   MEMBER
   TREASURER
   ADMIN
-  LENDER
 }
 
 enum GroupFrequency {
@@ -20,11 +19,54 @@ enum GroupFrequency {
   MONTHLY
 }
 
+enum GroupType {
+  ROTATING_EQUAL
+  ACCUMULATING_SHARES
+  ROTATING_AUCTION
+  SOLIDARITY_FUND
+  INVESTMENT_CLUB
+  HYBRID_ROTATING_SAVINGS
+}
+
+enum ContributionModel {
+  FIXED_EQUAL
+  FLEXIBLE_SHARES
+  FIXED_SPLIT
+}
+
+enum RotationType {
+  SEQUENTIAL
+  RANDOM_DRAW
+  AUCTION
+  GROUP_VOTE
+}
+
+enum PenaltyType {
+  NONE
+  FIXED_FINE
+  PERCENTAGE_FINE
+  TURN_LOSS
+}
+
+enum GroupLanguage {
+  KINYARWANDA
+  ENGLISH
+  FRENCH
+}
+
+enum DisbursementType {
+  GRANT
+  LOAN
+  MIXED
+}
+
 enum ContributionStatus {
   PENDING
-  CONFIRMED
-  FAILED
+  VERIFIED
+  LATE
   MISSED
+  DISPUTED
+  WAIVED
 }
 
 enum LoanStatus {
@@ -32,6 +74,7 @@ enum LoanStatus {
   APPROVED
   DECLINED
   REPAID
+  DEFAULTED
 }
 
 enum UssdSessionState {
@@ -43,10 +86,16 @@ enum UssdSessionState {
 enum NotificationType {
   CONTRIBUTION_CONFIRMED
   CONTRIBUTION_FAILED
+  CONTRIBUTION_REMINDER
+  CONTRIBUTION_OVERDUE
   MISSED_PAYMENT
   YOUR_TURN
+  PAYOUT_SCHEDULED
   LOAN_APPROVED
   LOAN_DECLINED
+  LOAN_REPAYMENT_DUE
+  LOAN_REPAYMENT_LATE
+  LOAN_DEFAULT
   WEEKLY_REMINDER
   SUBSCRIPTION_TRIAL_ENDING
   SUBSCRIPTION_PAYMENT_DUE
@@ -57,6 +106,10 @@ enum NotificationType {
   GROUP_REACTIVATED
   SUBSCRIPTION_TIER_UPGRADED
   SUBSCRIPTION_TIER_DOWNGRADED
+  DISPUTE_OPENED
+  DISPUTE_RESOLVED
+  GROUP_ANNOUNCEMENT
+  BILLING_REMINDER
 }
 
 enum NotificationChannel {
@@ -78,6 +131,15 @@ enum DisputeStatus {
   CLOSED
 }
 
+enum DisputeType {
+  CONTRIBUTION_NOT_RECORDED
+  WRONG_AMOUNT_RECORDED
+  PAYOUT_DISPUTE
+  LOAN_DISPUTE
+  ROTATION_ORDER_DISPUTE
+  TREASURER_MISCONDUCT
+}
+
 enum SubscriptionTier {
   STARTER
   GROWTH
@@ -91,6 +153,7 @@ enum SubscriptionStatus {
   ACTIVE
   OVERDUE
   SUSPENDED
+  ARCHIVED
   CANCELLED
 }
 
@@ -98,6 +161,12 @@ enum PaymentStatus {
   PENDING
   CONFIRMED
   FAILED
+}
+
+enum WaitlistStatus {
+  WAITING
+  INVITED
+  EXPIRED
 }
 
 model User {
@@ -109,6 +178,7 @@ model User {
   roles           Role[]    @default([MEMBER])
   isActive        Boolean   @default(true)
   deletedAt       DateTime?
+  referralCode    String?   @unique  // treasurer's personal referral code
 
   refreshTokens        RefreshToken[]
   groupMembers         GroupMember[]
@@ -122,19 +192,24 @@ model User {
   auditLogs            AuditLog[]
   subscriptionPayments SubscriptionPayment[]
   memberPenalties      MemberPenalty[]
+  auctionBids          AuctionBid[]
+  memberShareBalances  MemberShareBalance[]
+  waitlistEntries      WaitlistEntry[]
+  referralsMade        ReferralLog[]         @relation("Referrer")
+  referralsReceived    ReferralLog[]         @relation("ReferredUser")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model OtpRecord {
-  id          String   @id @default(uuid())
-  phoneNumber String
-  hashedOtp   String
-  expiresAt   DateTime
-  failedAttempts Int   @default(0)
-  lockedUntil DateTime?
-  createdAt   DateTime @default(now())
+  id             String    @id @default(uuid())
+  phoneNumber    String
+  hashedOtp      String
+  expiresAt      DateTime
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  createdAt      DateTime  @default(now())
 
   @@index([phoneNumber, createdAt])
   @@index([expiresAt])
@@ -156,7 +231,6 @@ model RefreshToken {
 model Group {
   id                 String             @id @default(uuid())
   name               String
-  contributionAmount Float
   frequency          GroupFrequency
   inviteCode         String             @unique
   bankName           String?
@@ -167,6 +241,51 @@ model Group {
   suspendedAt        DateTime?
   suspensionReason   String?
   deletedAt          DateTime?
+
+  // Group type configuration
+  groupType         GroupType         @default(ROTATING_EQUAL)
+  contributionModel ContributionModel @default(FIXED_EQUAL)
+
+  // For FIXED_EQUAL and FIXED_SPLIT (Int = RWF, no decimals)
+  contributionAmount Int?
+  rotatingAmount     Int?
+  savingsAmount      Int?
+
+  // For FLEXIBLE_SHARES
+  sharePrice         Int?
+  maxSharesPerMember Int?
+
+  // Rotation configuration
+  rotationType       RotationType @default(SEQUENTIAL)
+  rotationIndex      Int          @default(0)
+  currentCycleNumber Int          @default(1)
+  auctionWindowHours Int?
+  minBidPercentage   Int?
+
+  // Loan configuration
+  loansEnabled        Boolean  @default(true)
+  loanMinTenureMonths Int      @default(6)
+  loanMaxPercentage   Int      @default(30)
+  loanInterestRate    Decimal? @db.Decimal(5, 2)
+
+  // Penalty configuration
+  gracePeriodDays     Int         @default(3)
+  latePenaltyType     PenaltyType @default(NONE)
+  latePenaltyAmount   Int?
+  missesBeforeRemoval Int         @default(3)
+
+  // Language preference
+  language GroupLanguage @default(KINYARWANDA)
+
+  // Solidarity/Emergency fund config
+  emergencyCategories String[]
+  disbursementType    DisbursementType?
+  maxDisbursement     Int?
+
+  // Registration (Ministerial Order compliance)
+  sectorRegistered   String?
+  registrationNumber String?
+  referredByCode     String?  // referral code used at group creation
 
   members              GroupMember[]
   inviteCodes          GroupInviteCode[]
@@ -179,6 +298,10 @@ model Group {
   feedEvents           ActivityFeedEvent[]
   penaltyRules         PenaltyRule[]
   memberPenalties      MemberPenalty[]
+  auctionBids          AuctionBid[]
+  memberShareBalances  MemberShareBalance[]
+  groupFund            GroupFund?
+  waitlistEntries      WaitlistEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -215,6 +338,7 @@ model RotationLog {
   actorId       String
   previousOrder Json
   newOrder      Json
+  randomSeed    String?
   group         Group    @relation(fields: [groupId], references: [id])
   createdAt     DateTime @default(now())
 }
@@ -223,12 +347,17 @@ model Contribution {
   id                String             @id @default(uuid())
   groupId           String
   userId            String
-  amount            Float
+  amount            Int
   weekNumber        Int
   status            ContributionStatus @default(PENDING)
   momoTransactionId String?
   bankReference     String?
   failureReason     String?
+  verifiedAt        DateTime?
+  verifiedById      String?
+
+  sharesCount Int?
+  shareValue  Int?
 
   group Group @relation(fields: [groupId], references: [id])
   user  User  @relation(fields: [userId], references: [id])
@@ -236,10 +365,11 @@ model Contribution {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([groupId, userId, weekNumber, bankReference])
   @@index([userId, createdAt])
   @@index([groupId, weekNumber, status])
   @@index([groupId, userId, weekNumber])
-  @@unique([groupId, userId, weekNumber, bankReference])
+  @@index([momoTransactionId])
 }
 
 model CreditScore {
@@ -282,15 +412,18 @@ model SharedReportAccessLog {
 }
 
 model Loan {
-  id          String     @id @default(uuid())
-  groupId     String
-  requesterId String
-  amount      Float
-  reason      String
-  status      LoanStatus @default(PENDING)
-  disbursedAt DateTime?
-  decidedById String?
-  decisionNote String?
+  id              String     @id @default(uuid())
+  groupId         String
+  requesterId     String
+  amount          Int
+  interestAmount  Int        @default(0)
+  totalRepayable  Int        @default(0)
+  reason          String
+  status          LoanStatus @default(PENDING)
+  disbursedAt     DateTime?
+  decidedById     String?
+  decisionNote    String?
+  repaymentMonths Int        @default(1)
 
   group      Group           @relation(fields: [groupId], references: [id])
   requester  User            @relation(fields: [requesterId], references: [id])
@@ -313,11 +446,11 @@ model PenaltyRule {
   groupId     String
   name        String
   description String?
-  amount      Float
+  amount      Int
   isActive    Boolean @default(true)
   createdById String
 
-  group Group @relation(fields: [groupId], references: [id])
+  group           Group           @relation(fields: [groupId], references: [id])
   memberPenalties MemberPenalty[]
 
   createdAt DateTime @default(now())
@@ -325,18 +458,18 @@ model PenaltyRule {
 }
 
 model MemberPenalty {
-  id             String              @id @default(uuid())
-  groupId        String
-  userId         String
-  penaltyRuleId  String
-  assignedById   String
-  status         MemberPenaltyStatus @default(PENDING)
-  bankReference  String?
-  paidAt         DateTime?
-  note           String?
+  id            String              @id @default(uuid())
+  groupId       String
+  userId        String
+  penaltyRuleId String
+  assignedById  String
+  status        MemberPenaltyStatus @default(PENDING)
+  bankReference String?
+  paidAt        DateTime?
+  note          String?
 
-  group Group @relation(fields: [groupId], references: [id])
-  user User @relation(fields: [userId], references: [id])
+  group       Group       @relation(fields: [groupId], references: [id])
+  user        User        @relation(fields: [userId], references: [id])
   penaltyRule PenaltyRule @relation(fields: [penaltyRuleId], references: [id])
 
   createdAt DateTime @default(now())
@@ -349,7 +482,7 @@ model MemberPenalty {
 model LoanRepayment {
   id        String   @id @default(uuid())
   loanId    String
-  amount    Float
+  amount    Int
   date      DateTime @default(now())
   loan      Loan     @relation(fields: [loanId], references: [id])
   createdAt DateTime @default(now())
@@ -395,24 +528,12 @@ model NotificationSetting {
   @@unique([userId, type])
 }
 
-model Lender {
-  id              String   @id @default(uuid())
-  institutionName String
-  licenseNumber   String
-  email           String   @unique
-  password        String
-  isApproved      Boolean  @default(false)
-  isSuspended     Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
-
 model GroupSubscription {
   id                   String             @id @default(uuid())
   groupId              String
   tier                 SubscriptionTier
   memberCountAtBilling Int
-  amountDue            Float
+  amountDue            Int
   currency             String             @default("RWF")
   billingDate          DateTime
   status               SubscriptionStatus @default(TRIAL)
@@ -435,7 +556,7 @@ model SubscriptionPayment {
   groupId           String
   subscriptionId    String
   treasurerId       String
-  amountPaid        Float
+  amountPaid        Int
   momoTransactionId String?
   status            PaymentStatus @default(PENDING)
   attemptNumber     Int           @default(1)
@@ -467,6 +588,7 @@ model Dispute {
   groupId          String
   raiserId         String
   weekNumber       Int
+  disputeType      DisputeType   @default(CONTRIBUTION_NOT_RECORDED)
   claimDescription String
   momoReference    String?
   status           DisputeStatus @default(OPEN)
@@ -477,6 +599,9 @@ model Dispute {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([groupId, status, createdAt])
+  @@index([raiserId, status, createdAt])
 }
 
 model ActivityFeedEvent {
@@ -496,4 +621,72 @@ model AuditLog {
   metadata   Json?
   actor      User?    @relation(fields: [actorId], references: [id])
   createdAt  DateTime @default(now())
+}
+
+model AuctionBid {
+  id           String   @id @default(uuid())
+  groupId      String
+  memberId     String
+  periodNumber Int
+  bidAmount    Int
+  submittedAt  DateTime @default(now())
+  isWinning    Boolean  @default(false)
+  group        Group    @relation(fields: [groupId], references: [id])
+  member       User     @relation(fields: [memberId], references: [id])
+
+  @@index([groupId, memberId, periodNumber])
+  @@index([groupId, periodNumber, isWinning])
+}
+
+model MemberShareBalance {
+  id                  String   @id @default(uuid())
+  groupId             String
+  memberId            String
+  totalShares         Int      @default(0)
+  currentPeriodShares Int      @default(0)
+  lastUpdated         DateTime @default(now())
+  group               Group    @relation(fields: [groupId], references: [id])
+  member              User     @relation(fields: [memberId], references: [id])
+
+  @@unique([groupId, memberId])
+  @@index([memberId])
+}
+
+model GroupFund {
+  id                  String   @id @default(uuid())
+  groupId             String   @unique
+  totalBalance        Int      @default(0)
+  totalShares         Int      @default(0)
+  totalInterestEarned Int      @default(0)
+  activeLoanBalance   Int      @default(0)
+  lastUpdated         DateTime @default(now())
+  group               Group    @relation(fields: [groupId], references: [id])
+}
+
+model WaitlistEntry {
+  id        String         @id @default(uuid())
+  groupId   String
+  userId    String
+  status    WaitlistStatus @default(WAITING)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  group Group @relation(fields: [groupId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+  @@index([groupId, status])
+}
+
+model ReferralLog {
+  id             String   @id @default(uuid())
+  referrerId     String
+  referredUserId String
+  groupId        String?
+  status         String   @default("PENDING")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  referrer     User @relation("Referrer", fields: [referrerId], references: [id])
+  referredUser User @relation("ReferredUser", fields: [referredUserId], references: [id])
 }

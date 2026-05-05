@@ -42,4 +42,20 @@ export class SubscriptionsController {
   manualPay(@Param('groupId') groupId: string, @CurrentUser() user: User) {
     return this.subscriptionsService.manualPay(groupId, user.id);
   }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get('referral/my-code')
+  @ApiOperation({ summary: 'Get or generate your personal referral code' })
+  getMyReferralCode(@CurrentUser() user: User) {
+    return this.subscriptionsService.getMyReferralCode(user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get('referral/my-referrals')
+  @ApiOperation({ summary: 'View all referrals you have made and their reward status' })
+  getMyReferrals(@CurrentUser() user: User) {
+    return this.subscriptionsService.getMyReferrals(user.id);
+  }
 }

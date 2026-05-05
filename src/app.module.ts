@@ -12,9 +12,11 @@ import { CreditScoreModule } from './credit-score/credit-score.module';
 import { LoansModule } from './loans/loans.module';
 import { UssdModule } from './ussd/ussd.module';
 import { NotificationsModule } from './notifications/notifications.module';
-import { LendersModule } from './lenders/lenders.module';
 import { DisputesModule } from './disputes/disputes.module';
 import { AdminModule } from './admin/admin.module';
+import { IntegrationsModule } from './integrations/integrations.module';
+import { AuctionModule } from './auction/auction.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -22,7 +24,7 @@ import { AdminModule } from './admin/admin.module';
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{
       ttl: 60000,
-      limit: 100, // 100 requests per minute globally
+      limit: 100,
     }]),
     PrismaModule,
     AuthModule,
@@ -34,9 +36,11 @@ import { AdminModule } from './admin/admin.module';
     LoansModule,
     UssdModule,
     NotificationsModule,
-    LendersModule,
     DisputesModule,
     AdminModule,
+    IntegrationsModule,
+    AuctionModule,
+    AnalyticsModule,
   ],
 })
 export class AppModule {}

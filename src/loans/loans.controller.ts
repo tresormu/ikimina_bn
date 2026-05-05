@@ -16,13 +16,13 @@ export class LoansController {
   constructor(private readonly loansService: LoansService) {}
 
   @Post('request')
-  @ApiOperation({ summary: 'Submit a loan request' })
+  @ApiOperation({ summary: 'Member submits a loan request' })
   requestLoan(@CurrentUser() user: User, @Body() dto: RequestLoanDto) {
     return this.loansService.requestLoan(user.id, dto);
   }
 
   @Get('my')
-  @ApiOperation({ summary: 'View own loan requests' })
+  @ApiOperation({ summary: 'Member views their own loan history' })
   getMyLoans(@CurrentUser() user: User) {
     return this.loansService.getMyLoans(user.id);
   }
@@ -36,11 +36,11 @@ export class LoansController {
   @Post(':loanId/decision')
   @ApiOperation({ summary: 'Treasurer approves or declines a pending loan request' })
   decideLoan(@Param('loanId') loanId: string, @CurrentUser() user: User, @Body() dto: DecideLoanDto) {
-    return this.loansService.decideLoan(loanId, user.id, dto);
+    return this.loansService.decideLoan(loanId, user.id, dto.decision, dto.note);
   }
 
   @Post(':loanId/repay')
-  @ApiOperation({ summary: 'Treasurer records a repayment' })
+  @ApiOperation({ summary: 'Treasurer records a loan repayment installment' })
   repay(@Param('loanId') loanId: string, @CurrentUser() user: User, @Body() dto: RepayLoanDto) {
     return this.loansService.repay(loanId, user.id, dto);
   }

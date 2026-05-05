@@ -4,6 +4,7 @@ import { CreditScoreService } from './credit-score.service';
 
 @Module({
   controllers: [CreditScoreController],
-  providers: [CreditScoreService]
+  providers: [CreditScoreService],
+  exports: [CreditScoreService],
 })
 export class CreditScoreModule {}

@@ -1,8 +1,10 @@
 import { Injectable, BadRequestException, UnauthorizedException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SmsService } from '../integrations/sms.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -14,16 +16,15 @@ export class AuthService {
 
   constructor(
     private prisma: PrismaService,
+    private sms: SmsService,
     private jwtService: JwtService,
     private configService: ConfigService,
   ) {}
 
   private generateNumericOtp(length: number): string {
-    let otp = '';
-    for (let i = 0; i < length; i++) {
-      otp += Math.floor(Math.random() * 10).toString();
-    }
-    return otp;
+    // cryptographically secure — Math.random() is not suitable for OTPs
+    const max = Math.pow(10, length);
+    return randomInt(0, max).toString().padStart(length, '0');
   }
 
   async sendOtp(dto: SendOtpDto) {
@@ -58,8 +59,8 @@ export class AuthService {
       },
     });
 
-    // 4. Mock sending SMS via Africa's Talking
-    this.logger.log(`[MOCK SMS] OTP generated for ${dto.phoneNumber}`);
+    // 4. Send OTP via Africa's Talking SMS
+    await this.sms.sendSms(dto.phoneNumber, `Your IkiminaPass verification code is: ${rawOtp}. Valid for 5 minutes. Do not share this code.`);
 
     return { message: 'OTP sent successfully' };
   }
